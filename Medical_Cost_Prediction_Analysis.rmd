@@ -1,0 +1,306 @@
+---
+title: ""
+output: html_document
+date: ""
+---
+
+
+```{r Libraries, warning=FALSE, message=FALSE}
+
+#library
+
+library(readxl)
+library(magrittr)
+library(flextable)
+library(writexl)
+library(tidyr)
+library(dplyr)
+library(psych)
+library(quantmod)
+library(MLmetrics)
+library(forecast)
+library(GGally)
+library(ggplot2)
+
+
+#import data set
+
+
+DF1 = read_excel("E:/A M.S in Informatics - Northeastern/Analytics/Healthcare Pharma Data and Apps/Assingment and Discussion 4/medical_costs.xlsx")
+
+```
+
+
+<br>
+
+---
+
+---
+
+<br>
+
+
+```{r warning=FALSE}
+#Summary statistics of outcome
+
+#for whole data 
+Table = DF1 %>% 
+  psych::describe(skew = FALSE) %>% 
+  t() %>% 
+  round(2)
+
+Table = as.data.frame(Table)
+write_xlsx(Table,"filename2.xlsx")
+
+#For Male Population 
+
+Males = DF1[DF1$Gender == 'M', ]
+Table2 = Males %>% 
+  psych::describe(skew = FALSE) %>% 
+  t() %>% 
+  round(2)
+
+Table2 = as.data.frame(Table2)
+write_xlsx(Table2,"filename3.xlsx")
+
+#For Female population
+
+Females = DF1[DF1$Gender == 'F', ]
+Table3 = Females %>% 
+  psych::describe(skew = FALSE) %>% 
+  t() %>% 
+  round(2)
+
+Table3 = as.data.frame(Table3)
+write_xlsx(Table3,"filename4.xlsx")
+
+
+```
+
+<br>
+
+---
+
+---
+
+<br>
+
+```{r warning=FALSE}
+#Before we will predict the data we will check distribution of cost
+
+ggplot(data = DF1, aes(x = Cost)) + 
+  geom_density(alpha = 0.5) + 
+  ggtitle("Distribution of Cost")
+
+
+```
+
+
+<br>
+
+---
+
+---
+
+<br>
+
+```{r warning=FALSE}
+
+#Since above plots suggest that tobacco consumption can have big influence on hospital cost so we will plot distribution of charges in reference to tobacco consumption
+
+ggplot(data = DF1, aes(x = Cost, fill = Tobacco)) + 
+  geom_density(alpha = 0.5) + 
+  ggtitle("Distribution of Cost per Tobacco Consumption Category")
+
+```
+
+<br>
+
+---
+
+---
+
+<br>
+
+
+
+```{r warning=FALSE}
+
+# We will be analyzing this with various other visualization tools
+
+for (col in c('Age', 'Gender', 'BMI', 'Tobacco')) {
+  plot <- ggplot(data = DF1,
+                 aes_string(x = col, y = 'Cost', group = col, fill = col)) + 
+            geom_boxplot(show.legend = FALSE) + 
+            ggtitle(glue::glue("Boxplot of Medical Cost per {col}"))
+  print(plot)
+}
+
+
+```
+
+<br>
+
+---
+
+---
+
+<br>
+
+
+
+```{r warning=FALSE}
+
+#Calculating for conditional mean (linear regression) of outcome predicted on group
+#In reference to cost as a response variable or dependent variable
+
+#Considering age on cost 
+Model1 = lm(data=DF1, Cost ~ Age)
+Model1 = summary(Model1)
+Model1
+
+#Considering age and gender on cost
+Model2 = lm(data=DF1, Cost ~ Age + Gender)
+Model2 = summary(Model2)
+Model2
+
+#Considering age and gender on cost
+Model3 = lm(data=DF1, Cost ~ Age + Tobacco + Gender)
+Model3 = summary(Model3)
+Model3
+
+#Considering Age, gender and BMI on Cost
+Model4 = lm(data=DF1, Cost ~ Age + Gender + Tobacco + BMI)
+Model4 = summary(Model4)
+Model4
+
+#Combine into a single table
+
+All = cbind(Model1,Model2,Model3,Model4)
+All
+
+
+#ft4 <- flextable(ft4)
+#save_as_docx(ft4, path = "Table1.docx")
+
+#ft4 = data.frame(All)
+#Table4 = as.data.frame(Table4)
+#write_xlsx(Table4,"filename5.xlsx")
+
+```
+
+
+
+
+<br>
+
+---
+
+---
+
+<br>
+
+```{r warning=FALSE}
+
+#Predict the outcome
+
+#Creating Partition using feature selection
+DF1$TobaccoNew = ifelse(DF1$Tobacco=="yes",1,0)
+DF1$GenderNew = ifelse(DF1$Gender=="M",1,0)
+TrainIndex = sample(nrow(DF1), nrow(DF1)*.7)
+Train = DF1[TrainIndex,]
+Test = DF1[-TrainIndex,]
+
+
+#Predict Values using machine learning
+
+Model5 = lm(formula = Cost ~ Age + Gender + BMI + Tobacco, data = DF1)
+PredictY = predict(Model5, Test)
+MAE = MAE(PredictY, Test$Cost)
+RootMSE = RMSE(PredictY, Test$Cost)
+
+
+#Now lets make new objects to create two more values for train and test sets for Cost
+TrainY = Train$Cost
+TestY = Test$charges
+
+
+#We will be using polynomial selections ato do that we will check the correlation between different variables
+
+ggcorr(DF1 %>% 
+       mutate_if(is.factor, as.numeric), 
+       label = TRUE)
+
+
+#Polynomial Combinations to predict data
+#For Train
+
+TrainX =  Train %>% 
+  select(c(Cost, GenderNew, Age, BMI, TobaccoNew)) 
+
+#For Test Data
+
+TestX = Test %>% 
+  select(c(Cost, GenderNew, Age, BMI, TobaccoNew)) 
+
+
+#Using Formula for polynomial combinations
+
+Formula = as.formula(
+  paste(
+    ' ~ .^2 + ', 
+    paste('poly(', colnames(TrainX), ', 2, raw=TRUE)[, 2]', collapse = ' + ')
+  )
+)
+
+Formula
+
+#We will inserts the above formula in the dataset
+
+TrainPoly = as.data.frame(model.matrix(Formula, data = TrainX))
+TestPoly = as.data.frame(model.matrix(Formula, data = TestX))
+TrainPoly$Cost = TrainY
+TestPoly$Cost = TestY
+#To check if columns are fitted into the data set
+colnames(TrainPoly)
+
+
+
+#Now we will make a new model using backward stepwise selection
+
+NewModel = lm(formula = Cost ~ ., data = TrainPoly)
+step(NewModel)
+
+
+#Calculating for root mean sqaure 
+
+Modelpoly = lm(formula = Cost ~ BMI + GenderNew + TobaccoNew + `poly(Age, 2, raw = TRUE)[, 2]` + 
+    `poly(BMI, 2, raw = TRUE)[, 2]`  + 
+    `BMI:TobaccoNew` + `GenderNew:TobaccoNew`, data = TrainPoly)
+
+PredictY = predict(Modelpoly, TestPoly)
+MAE2 = MAE(PredictY, Test$Cost)
+RMSE2= RMSE(PredictY, Train$Cost)
+RMSLE2 = RMSLE(PredictY, Test$Cost)
+
+Combined = cbind("MAE" = MAE2, "RMSE" = RMSE2, "RMSLE" = RMSLE2)
+Combined
+
+par(mfrow=c(1,2))
+
+#Now we will compare the summary statistics of orginal vs predicted 
+#Orignal Null hypothesis
+summary(Model5)
+hist(Model5$residuals)
+
+
+#Predcited Model ALternative Hypothesis
+summary(Modelpoly)
+hist(Modelpoly$residuals)
+
+
+```
+
+
+
+
